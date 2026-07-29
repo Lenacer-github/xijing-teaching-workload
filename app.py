@@ -122,12 +122,19 @@ OWNER_EXPORT_ORDER = [
     "王秀芹",
 ]
 
-LOGO_DATA_URI = (
-    "data:image/png;base64,"
-    + base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
-    if LOGO_PATH.exists()
-    else ""
-)
+@st.cache_data(show_spinner=False)
+def load_image_data_uri(image_path):
+    """缓存静态图片编码，避免每次 Streamlit 重跑都重复读取和转换。"""
+    path = Path(image_path)
+    if not path.exists():
+        return ""
+    return (
+        "data:image/png;base64,"
+        + base64.b64encode(path.read_bytes()).decode("ascii")
+    )
+
+
+LOGO_DATA_URI = load_image_data_uri(str(LOGO_PATH))
 
 
 @st.cache_data(show_spinner=False)
@@ -1869,8 +1876,35 @@ components.html(
     if (parent.__workloadCalendarObserver) {
         parent.__workloadCalendarObserver.disconnect();
     }
-    const calendarObserver = new parent.MutationObserver(() => {
-        window.requestAnimationFrame(applyChineseLabels);
+    let labelUpdateScheduled = false;
+    const calendarObserver = new parent.MutationObserver((mutations) => {
+        /*
+         * Streamlit 会频繁更新状态节点。只在新增日期选择器、上传控件或
+         * 弹层时处理中文标签，避免每次细小 DOM 变化都扫描整张页面。
+         */
+        const needsUpdate = mutations.some((mutation) =>
+            Array.from(mutation.addedNodes).some((node) => {
+                if (node.nodeType !== parent.Node.ELEMENT_NODE) return false;
+                return (
+                    node.matches?.(
+                        '[data-testid="stDateInput"], ' +
+                        '[data-testid="stFileUploader"], ' +
+                        '[role="dialog"], [data-baseweb="calendar"]'
+                    ) ||
+                    node.querySelector?.(
+                        '[data-testid="stDateInput"], ' +
+                        '[data-testid="stFileUploader"], ' +
+                        '[role="dialog"], [data-baseweb="calendar"]'
+                    )
+                );
+            })
+        );
+        if (!needsUpdate || labelUpdateScheduled) return;
+        labelUpdateScheduled = true;
+        parent.requestAnimationFrame(() => {
+            labelUpdateScheduled = false;
+            applyChineseLabels();
+        });
     });
     calendarObserver.observe(parent.document.body, {
         childList: true,
