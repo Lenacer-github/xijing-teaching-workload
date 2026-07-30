@@ -881,12 +881,14 @@ st.markdown("""
     }
     [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .operations-section-marker)
     [data-testid="column"]:has(.operation-progress-marker)
-    [data-testid="stFileDropzoneInstructions"] {
+    [data-testid="stFileDropzoneInstructions"],
+    [data-testid="stFileUploaderDropzoneInstructions"] {
         display: none !important;
     }
     [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .operations-section-marker)
     [data-testid="column"]:has(.operation-progress-marker)
-    [data-testid="stFileUploadDropzone"] {
+    [data-testid="stFileUploadDropzone"],
+    [data-testid="stFileUploaderDropzone"] {
         min-height: 38px;
         height: 38px;
         padding: 0 !important;
@@ -895,7 +897,8 @@ st.markdown("""
     }
     [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .operations-section-marker)
     [data-testid="column"]:has(.operation-progress-marker)
-    [data-testid="stFileUploadDropzone"] > button {
+    [data-testid="stFileUploadDropzone"] > button,
+    [data-testid="stFileUploaderDropzone"] > button {
         width: 100% !important;
         min-width: 0 !important;
         min-height: 38px !important;
@@ -1210,26 +1213,31 @@ st.markdown("""
     }
 
     /* 恢复文件组件 */
-    [data-testid="stFileUploadDropzone"] {
+    [data-testid="stFileUploadDropzone"],
+    [data-testid="stFileUploaderDropzone"] {
         min-height: 74px;
         border-color: #CFDBEB;
         border-radius: 10px;
         background: #F7FAFE;
     }
-    [data-testid="stFileDropzoneInstructions"] > div > span::before {
+    [data-testid="stFileDropzoneInstructions"] > div > span::before,
+    [data-testid="stFileUploaderDropzoneInstructions"] > div > span::before {
         color: #334155;
         font-size: 13px !important;
     }
-    [data-testid="stFileDropzoneInstructions"] small::before {
+    [data-testid="stFileDropzoneInstructions"] small::before,
+    [data-testid="stFileUploaderDropzoneInstructions"] small::before {
         color: #718096;
         font-size: 11px !important;
     }
-    [data-testid="stFileUploadDropzone"] > button {
+    [data-testid="stFileUploadDropzone"] > button,
+    [data-testid="stFileUploaderDropzone"] > button {
         width: 110px !important;
         min-width: 110px !important;
         height: 36px !important;
     }
-    [data-testid="stFileUploadDropzone"] > button::after {
+    [data-testid="stFileUploadDropzone"] > button::after,
+    [data-testid="stFileUploaderDropzone"] > button::after {
         color: var(--brand) !important;
         font-size: 13px;
     }
@@ -1326,7 +1334,8 @@ st.markdown("""
     [role="option"][aria-selected="true"] {
         background-color: #EDF5FF !important;
     }
-    [data-testid="stFileUploadDropzone"] > button {
+    [data-testid="stFileUploadDropzone"] > button,
+    [data-testid="stFileUploaderDropzone"] > button {
         border: 1px solid #C9D7E8 !important;
         background: #FFFFFF !important;
     }
@@ -1407,6 +1416,28 @@ st.markdown("""
             align-items: flex-start;
             flex-direction: column;
         }
+    }
+
+    /* Streamlit 1.37 上传组件兼容：保持“恢复进度”为紧凑的整宽次级按钮。 */
+    [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .operations-section-marker)
+    [data-testid="column"]:has(.operation-progress-marker)
+    [data-testid="stFileUploaderDropzone"] {
+        min-height: 38px !important;
+        height: 38px !important;
+        padding: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .operations-section-marker)
+    [data-testid="column"]:has(.operation-progress-marker)
+    [data-testid="stFileUploaderDropzone"] > button {
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 38px !important;
+        height: 38px !important;
+        font-size: .9rem !important;
+        font-weight: 680 !important;
+        line-height: 1.25 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -1508,328 +1539,376 @@ def sync_widget_values_to_app_data():
             row["time"] = time_value.strftime("%Y-%m-%d") if time_value else ""
 
 
+@st.fragment
+def render_basic_info():
+    sync_widget_values_to_app_data()
+    validation_state = collect_validation_state(st.session_state.app_data)
+    # ================= 3. 基础信息填报 =================
+    with st.container(border=True):
+        basic_error_class = (
+            " invalid-section-marker"
+            if (
+                st.session_state.validation_requested
+                and validation_state["first_error_target"] == "basic-info"
+            )
+            else ""
+        )
+        st.markdown(
+            f"<div id='basic-info' class='basic-section-marker{basic_error_class}'></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("""
+            <div class="section-heading">
+                <span class="section-icon">👨‍🏫</span>
+                <div>
+                    <h2>基本信息</h2>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            saved_dept = st.session_state.app_data.get("dept", "")
+            if saved_dept == "电子商务":
+                saved_dept = "数字商务系"
+            dept_index = DEPARTMENT_OPTIONS.index(saved_dept) if saved_dept in DEPARTMENT_OPTIONS else 0
+            dept = st.selectbox(
+                "所属系部",
+                DEPARTMENT_OPTIONS,
+                index=dept_index,
+                key="basic_dept"
+            )
+            st.session_state.app_data["dept"] = dept
+        with col2:
+            name = st.text_input(
+                "姓名",
+                value=st.session_state.app_data["name"],
+                key="basic_name"
+            )
+            st.session_state.app_data["name"] = name
+            if st.session_state.validation_requested and not name.strip():
+                st.error("请输入姓名")
+        with col3:
+            title = st.text_input(
+                "职称",
+                value=st.session_state.app_data["title"],
+                key="basic_title"
+            )
+            st.session_state.app_data["title"] = title
+            if st.session_state.validation_requested and not title.strip():
+                st.error("请输入职称")
+        with col4:
+            saved_term = st.session_state.app_data.get(
+                "term", DEFAULT_ACADEMIC_TERM
+            )
+            term = st.selectbox(
+                "学期",
+                ACADEMIC_TERM_OPTIONS,
+                index=ACADEMIC_TERM_OPTIONS.index(saved_term),
+                key="basic_term",
+            )
+            st.session_state.app_data["term"] = term
+            for row in st.session_state.app_data["rows"]:
+                row["term"] = term
+
+
+
+render_basic_info()
+
+@st.fragment
+def render_workload_details():
+    sync_widget_values_to_app_data()
+    validation_state = collect_validation_state(st.session_state.app_data)
+    # ================= 4. 工作量明细展示区 =================
+    with st.container(border=True):
+        st.markdown(
+            "<div id='workload-details' class='details-section-marker'></div>",
+            unsafe_allow_html=True,
+        )
+        detail_title_col, add_col = st.columns([5, 1])
+        with detail_title_col:
+            st.markdown("""
+                <div class="section-heading">
+                    <span class="section-icon">📝</span>
+                    <div>
+                        <h2>教学工作量明细</h2>
+                    </div>
+                </div>
+        """, unsafe_allow_html=True)
+        with add_col:
+            st.button(
+                "＋ 新增明细条目",
+                type="primary",
+                use_container_width=True,
+                on_click=add_empty_record,
+            )
+
+        st.info(
+            "同一项目、成果或事项涉及多个类别或阶段时，按最高标准认定，"
+            "不重复计算，不得跨类别重复申报。"
+        )
+
+        selected_standards = [
+            row["standard"]
+            for row in st.session_state.app_data["rows"]
+            if "standard" in row
+        ]
+        total_workload = 0.0
+        invalid_workload_rows = []
+
+        for i, row in enumerate(st.session_state.app_data["rows"]):
+            row_number = i + 1
+            row_errors = validation_state["row_errors"].get(row_number, [])
+            row_complete = not row_errors
+            row_status = "已完成" if row_complete else "待完善"
+            category = row.get("category", "")
+            if category in ("五、实践教学", "九、创新创业与第二课堂"):
+                accent_class = "accent-practice"
+            elif category in ("一、特殊贡献", "二、专业建设", "四、教学改革", "十、特色人才培养项目"):
+                accent_class = "accent-achievement"
+            elif category in ("三、教研室建设", "七、招生与就业", "八、公共性事务服务"):
+                accent_class = "accent-service"
+            else:
+                accent_class = "accent-teaching"
+            standard_owner = get_standard_owner(row.get("standard", ""))
+            owner_label = (
+                html.escape(standard_owner)
+                if standard_owner
+                else "未标注"
+            )
+
+            with st.container(border=True):
+                invalid_class = (
+                    " invalid-record-marker"
+                    if st.session_state.validation_requested and row_errors
+                    else ""
+                )
+                st.markdown(
+                    (
+                        f"<div id='record-{row_number}' "
+                        f"class='record-card-marker{invalid_class}'></div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                title_col, delete_col = st.columns([20, 0.8])
+                with title_col:
+                    st.markdown(
+                        f"""
+                        <div class="record-title {accent_class}">
+                            <span>记录 {row_number}</span>
+                            <span class="record-category-pill">{owner_label}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                with delete_col:
+                    st.button(
+                        "×",
+                        key=f"del_{i}",
+                        help=f"删除记录 {row_number}",
+                        on_click=delete_record,
+                        args=(i,),
+                    )
+
+                c1, c2, c3, c4 = st.columns([1.75, 4.5, 1.05, 1.9])
+                with c1:
+                    cat_index = (
+                        WORKLOAD_CATEGORY_OPTIONS.index(row["category"])
+                        if row["category"] in WORKLOAD_DATA
+                        else None
+                    )
+                    selected_category = st.selectbox(
+                        "项目类别",
+                        WORKLOAD_CATEGORY_OPTIONS,
+                        key=f"cat_{i}",
+                        index=cat_index,
+                        placeholder="请选择项目类别",
+                    )
+                    row["category"] = selected_category or ""
+                    if (
+                        st.session_state.validation_requested
+                        and not row["category"]
+                    ):
+                        st.error("请选择项目类别")
+                with c2:
+                    display_map = STANDARD_DISPLAY_MAPS.get(
+                        row["category"], {}
+                    )
+                    display_options = STANDARD_DISPLAY_OPTIONS.get(
+                        row["category"], ()
+                    )
+                    current_display = format_standard_option(row["standard"])
+                    default_idx = (
+                        display_options.index(current_display)
+                        if current_display in display_options
+                        else None
+                    )
+                    selected_standard_display = st.selectbox(
+                        "计算标准（输入关键词可检索）",
+                        display_options,
+                        key=f"std_{i}",
+                        index=default_idx,
+                        placeholder=(
+                            "请选择计算标准"
+                            if row["category"]
+                            else "请先选择项目类别"
+                        ),
+                        disabled=not row["category"],
+                        help="展开后可直接输入项目名称或核算规则中的关键词进行检索。",
+                    )
+                    row["standard"] = display_map.get(selected_standard_display, "")
+                    if (
+                        st.session_state.validation_requested
+                        and not row["standard"]
+                    ):
+                        st.error("请选择计算标准")
+                    elif (
+                        row["standard"]
+                        and selected_standards.count(row["standard"]) > 1
+                    ):
+                        duplicate_record = next(
+                            (
+                                number
+                                for number, other_row in enumerate(
+                                    st.session_state.app_data["rows"], start=1
+                                )
+                                if number != row_number
+                                and other_row.get("standard") == row["standard"]
+                            ),
+                            None,
+                        )
+                        if duplicate_record is not None:
+                            st.error(
+                                f"该成果类别与记录{duplicate_record}重复"
+                            )
+                with c3:
+                    workload_text = st.text_input(
+                        "工作量（学时）",
+                        key=f"wl_{i}",
+                        value=(
+                            ""
+                            if row.get("workload", "") in ("", None)
+                            else format_workload_value(row.get("workload"))
+                        ),
+                        placeholder="请输入工作量"
+                    )
+                    if not workload_text.strip():
+                        row["workload"] = ""
+                        if st.session_state.validation_requested:
+                            st.error("请填写工作量")
+                    else:
+                        try:
+                            workload_value = Decimal(workload_text.strip())
+                            if not workload_value.is_finite() or workload_value < 0:
+                                raise InvalidOperation
+                            row["workload"] = float(workload_value)
+                            total_workload += row["workload"]
+                        except (InvalidOperation, ValueError):
+                            invalid_workload_rows.append(str(i + 1))
+                            st.error("请输入不小于 0 的数字")
+                with c4:
+                    time_str = row.get("time", "")
+                    try:
+                        current_date = (
+                            datetime.strptime(time_str, "%Y-%m-%d").date()
+                            if time_str
+                            else None
+                        )
+                    except ValueError:
+                        current_date = None
+
+                    selected_date = st.date_input(
+                        "实际取得时间",
+                        value=current_date,
+                        key=f"time_{i}"
+                    )
+                    row["time"] = selected_date.strftime("%Y-%m-%d") if selected_date else ""
+                    if (
+                        st.session_state.validation_requested
+                        and not row["time"]
+                    ):
+                        st.error("请选择完成时间")
+
+                row["remark"] = st.text_area(
+                    "完成说明",
+                    key=f"rmk_{i}",
+                    value=row.get("remark", ""),
+                    placeholder="请填写具体成果/业绩内容，不得为空",
+                    height=68
+                )
+                if (
+                    st.session_state.validation_requested
+                    and not row["remark"].strip()
+                ):
+                    st.error("请填写具体成果或业绩内容")
+
+        if st.session_state.app_data["rows"]:
+            bottom_add_left, bottom_add_col, bottom_add_right = st.columns(
+                [4, 1.7, 4]
+            )
+            with bottom_add_col:
+                st.markdown(
+                    "<div class='bottom-add-record-marker'></div>",
+                    unsafe_allow_html=True,
+                )
+                st.button(
+                    "＋ 继续新增一条",
+                    use_container_width=True,
+                    on_click=add_empty_record,
+                    key="add_record_bottom",
+                )
+
+        total_workload_display = format_workload_value(f"{total_workload:.10f}")
+        st.markdown(
+            f"""
+            <div class="total-card">
+                <span class="total-label">工作量合计</span>
+                <span>
+                    <span class="total-value">{total_workload_display}</span>
+                    <span class="total-unit">学时</span>
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        new_record_target = st.session_state.pop(
+            "new_record_target", None
+        )
+        if new_record_target is not None:
+            new_record_id = json.dumps(f"record-{new_record_target}")
+            components.html(
+                f"""
+                <script>
+                window.setTimeout(() => {{
+                    const target = parent.document.getElementById({new_record_id});
+                    if (!target) return;
+                    const recordCard =
+                        target.closest('[data-testid="stVerticalBlockBorderWrapper"]') ||
+                        target.parentElement;
+                    recordCard.scrollIntoView({{
+                        behavior: "smooth",
+                        block: "start"
+                    }});
+                    window.setTimeout(() => {{
+                        const categorySelect = recordCard.querySelector(
+                            '[data-testid="stSelectbox"] [role="combobox"]'
+                        );
+                        if (categorySelect) {{
+                            categorySelect.focus({{preventScroll: true}});
+                        }}
+                    }}, 420);
+                }}, 160);
+                </script>
+                """,
+                height=0,
+            )
+
+
+render_workload_details()
+
 sync_widget_values_to_app_data()
 validation_state = collect_validation_state(st.session_state.app_data)
 
-# ================= 3. 基础信息填报 =================
-with st.container(border=True):
-    basic_error_class = (
-        " invalid-section-marker"
-        if (
-            st.session_state.validation_requested
-            and validation_state["first_error_target"] == "basic-info"
-        )
-        else ""
-    )
-    st.markdown(
-        f"<div id='basic-info' class='basic-section-marker{basic_error_class}'></div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown("""
-        <div class="section-heading">
-            <span class="section-icon">👨‍🏫</span>
-            <div>
-                <h2>基本信息</h2>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        saved_dept = st.session_state.app_data.get("dept", "")
-        if saved_dept == "电子商务":
-            saved_dept = "数字商务系"
-        dept_index = DEPARTMENT_OPTIONS.index(saved_dept) if saved_dept in DEPARTMENT_OPTIONS else 0
-        dept = st.selectbox(
-            "所属系部",
-            DEPARTMENT_OPTIONS,
-            index=dept_index,
-            key="basic_dept"
-        )
-        st.session_state.app_data["dept"] = dept
-    with col2:
-        name = st.text_input(
-            "姓名",
-            value=st.session_state.app_data["name"],
-            key="basic_name"
-        )
-        st.session_state.app_data["name"] = name
-        if st.session_state.validation_requested and not name.strip():
-            st.error("请输入姓名")
-    with col3:
-        title = st.text_input(
-            "职称",
-            value=st.session_state.app_data["title"],
-            key="basic_title"
-        )
-        st.session_state.app_data["title"] = title
-        if st.session_state.validation_requested and not title.strip():
-            st.error("请输入职称")
-    with col4:
-        saved_term = st.session_state.app_data.get(
-            "term", DEFAULT_ACADEMIC_TERM
-        )
-        term = st.selectbox(
-            "学期",
-            ACADEMIC_TERM_OPTIONS,
-            index=ACADEMIC_TERM_OPTIONS.index(saved_term),
-            key="basic_term",
-        )
-        st.session_state.app_data["term"] = term
-        for row in st.session_state.app_data["rows"]:
-            row["term"] = term
-
-# ================= 4. 工作量明细展示区 =================
-with st.container(border=True):
-    st.markdown(
-        "<div id='workload-details' class='details-section-marker'></div>",
-        unsafe_allow_html=True,
-    )
-    detail_title_col, add_col = st.columns([5, 1])
-    with detail_title_col:
-        st.markdown("""
-            <div class="section-heading">
-                <span class="section-icon">📝</span>
-                <div>
-                    <h2>教学工作量明细</h2>
-                </div>
-            </div>
-    """, unsafe_allow_html=True)
-    with add_col:
-        st.button(
-            "＋ 新增明细条目",
-            type="primary",
-            use_container_width=True,
-            on_click=add_empty_record,
-        )
-
-    st.info(
-        "同一项目、成果或事项涉及多个类别或阶段时，按最高标准认定，"
-        "不重复计算，不得跨类别重复申报。"
-    )
-
-    selected_standards = [
-        row["standard"]
-        for row in st.session_state.app_data["rows"]
-        if "standard" in row
-    ]
-    total_workload = 0.0
-    invalid_workload_rows = []
-
-    for i, row in enumerate(st.session_state.app_data["rows"]):
-        row_number = i + 1
-        row_errors = validation_state["row_errors"].get(row_number, [])
-        row_complete = not row_errors
-        row_status = "已完成" if row_complete else "待完善"
-        category = row.get("category", "")
-        if category in ("五、实践教学", "九、创新创业与第二课堂"):
-            accent_class = "accent-practice"
-        elif category in ("一、特殊贡献", "二、专业建设", "四、教学改革", "十、特色人才培养项目"):
-            accent_class = "accent-achievement"
-        elif category in ("三、教研室建设", "七、招生与就业", "八、公共性事务服务"):
-            accent_class = "accent-service"
-        else:
-            accent_class = "accent-teaching"
-        standard_owner = get_standard_owner(row.get("standard", ""))
-        owner_label = (
-            html.escape(standard_owner)
-            if standard_owner
-            else "未标注"
-        )
-
-        with st.container(border=True):
-            invalid_class = (
-                " invalid-record-marker"
-                if st.session_state.validation_requested and row_errors
-                else ""
-            )
-            st.markdown(
-                (
-                    f"<div id='record-{row_number}' "
-                    f"class='record-card-marker{invalid_class}'></div>"
-                ),
-                unsafe_allow_html=True,
-            )
-            title_col, delete_col = st.columns([20, 0.8])
-            with title_col:
-                st.markdown(
-                    f"""
-                    <div class="record-title {accent_class}">
-                        <span>记录 {row_number}</span>
-                        <span class="record-category-pill">{owner_label}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with delete_col:
-                st.button(
-                    "×",
-                    key=f"del_{i}",
-                    help=f"删除记录 {row_number}",
-                    on_click=delete_record,
-                    args=(i,),
-                )
-
-            c1, c2, c3, c4 = st.columns([1.75, 4.5, 1.05, 1.9])
-            with c1:
-                cat_index = (
-                    WORKLOAD_CATEGORY_OPTIONS.index(row["category"])
-                    if row["category"] in WORKLOAD_DATA
-                    else None
-                )
-                selected_category = st.selectbox(
-                    "项目类别",
-                    WORKLOAD_CATEGORY_OPTIONS,
-                    key=f"cat_{i}",
-                    index=cat_index,
-                    placeholder="请选择项目类别",
-                )
-                row["category"] = selected_category or ""
-                if (
-                    st.session_state.validation_requested
-                    and not row["category"]
-                ):
-                    st.error("请选择项目类别")
-            with c2:
-                display_map = STANDARD_DISPLAY_MAPS.get(
-                    row["category"], {}
-                )
-                display_options = STANDARD_DISPLAY_OPTIONS.get(
-                    row["category"], ()
-                )
-                current_display = format_standard_option(row["standard"])
-                default_idx = (
-                    display_options.index(current_display)
-                    if current_display in display_options
-                    else None
-                )
-                selected_standard_display = st.selectbox(
-                    "计算标准（输入关键词可检索）",
-                    display_options,
-                    key=f"std_{i}",
-                    index=default_idx,
-                    placeholder=(
-                        "请选择计算标准"
-                        if row["category"]
-                        else "请先选择项目类别"
-                    ),
-                    disabled=not row["category"],
-                    help="展开后可直接输入项目名称或核算规则中的关键词进行检索。",
-                )
-                row["standard"] = display_map.get(selected_standard_display, "")
-                if (
-                    st.session_state.validation_requested
-                    and not row["standard"]
-                ):
-                    st.error("请选择计算标准")
-                elif (
-                    row["standard"]
-                    and selected_standards.count(row["standard"]) > 1
-                ):
-                    duplicate_record = next(
-                        (
-                            number
-                            for number, other_row in enumerate(
-                                st.session_state.app_data["rows"], start=1
-                            )
-                            if number != row_number
-                            and other_row.get("standard") == row["standard"]
-                        ),
-                        None,
-                    )
-                    if duplicate_record is not None:
-                        st.error(
-                            f"该成果类别与记录{duplicate_record}重复"
-                        )
-            with c3:
-                workload_text = st.text_input(
-                    "工作量（学时）",
-                    key=f"wl_{i}",
-                    value=(
-                        ""
-                        if row.get("workload", "") in ("", None)
-                        else format_workload_value(row.get("workload"))
-                    ),
-                    placeholder="请输入工作量"
-                )
-                if not workload_text.strip():
-                    row["workload"] = ""
-                    if st.session_state.validation_requested:
-                        st.error("请填写工作量")
-                else:
-                    try:
-                        workload_value = Decimal(workload_text.strip())
-                        if not workload_value.is_finite() or workload_value < 0:
-                            raise InvalidOperation
-                        row["workload"] = float(workload_value)
-                        total_workload += row["workload"]
-                    except (InvalidOperation, ValueError):
-                        invalid_workload_rows.append(str(i + 1))
-                        st.error("请输入不小于 0 的数字")
-            with c4:
-                time_str = row.get("time", "")
-                try:
-                    current_date = (
-                        datetime.strptime(time_str, "%Y-%m-%d").date()
-                        if time_str
-                        else None
-                    )
-                except ValueError:
-                    current_date = None
-
-                selected_date = st.date_input(
-                    "实际取得时间",
-                    value=current_date,
-                    key=f"time_{i}"
-                )
-                row["time"] = selected_date.strftime("%Y-%m-%d") if selected_date else ""
-                if (
-                    st.session_state.validation_requested
-                    and not row["time"]
-                ):
-                    st.error("请选择完成时间")
-
-            row["remark"] = st.text_area(
-                "完成说明",
-                key=f"rmk_{i}",
-                value=row.get("remark", ""),
-                placeholder="请填写具体成果/业绩内容，不得为空",
-                height=68
-            )
-            if (
-                st.session_state.validation_requested
-                and not row["remark"].strip()
-            ):
-                st.error("请填写具体成果或业绩内容")
-
-    if st.session_state.app_data["rows"]:
-        bottom_add_left, bottom_add_col, bottom_add_right = st.columns(
-            [4, 1.7, 4]
-        )
-        with bottom_add_col:
-            st.markdown(
-                "<div class='bottom-add-record-marker'></div>",
-                unsafe_allow_html=True,
-            )
-            st.button(
-                "＋ 继续新增一条",
-                use_container_width=True,
-                on_click=add_empty_record,
-                key="add_record_bottom",
-            )
-
-    total_workload_display = format_workload_value(f"{total_workload:.10f}")
-    st.markdown(
-        f"""
-        <div class="total-card">
-            <span class="total-label">工作量合计</span>
-            <span>
-                <span class="total-value">{total_workload_display}</span>
-                <span class="total-unit">学时</span>
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
 # ================= 5. 文件生成与进度管理 =================
 with st.container(border=True):
     st.markdown(
