@@ -8,7 +8,24 @@
 - 将当前填报进度暂存为 JSON，并在后续导入恢复
 - A4 横向 Excel 输出，宽度固定为一页、纵向按内容自动分页
 
-## 本地运行
+## Bootstrap 响应式版（开发中）
+
+新版本采用 Bootstrap 5 响应式前端和 Flask Python 后端。表单输入、增删
+记录、检索与合计均在浏览器内即时完成，只有恢复暂存文件和导出 Excel 时
+访问后端，因此不会因普通输入触发整页重新运行。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python web_app.py
+```
+
+浏览器打开 `http://127.0.0.1:8601`。
+
+此改造版目前位于独立开发分支；原 Streamlit 版仍可按下述方式运行。
+
+## Streamlit 版
 
 建议使用 Python 3.11。
 
@@ -37,9 +54,13 @@ streamlit run app.py
 ```text
 .
 ├── app.py                 # Streamlit 应用入口
+├── web_app.py             # Bootstrap 版 Flask 后端
+├── workload_domain.py     # 共享目录、校验与排序规则
 ├── excel_export.py        # 云端兼容的 Excel 导出模块
 ├── requirements.txt       # Python 依赖
 ├── assets/                # 学院 Logo 与网站图标
+├── templates/             # Bootstrap 页面模板
+├── static/                # 前端样式、脚本与本地 Bootstrap
 ├── .streamlit/config.toml # Streamlit 主题配置
 └── 教学工作量类别与计算标准清单.md
 ```

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b4aa2">
+    <meta name="description" content="西京学院科技商学院教师教学工作量填报系统">
+    <title>教师教学工作量填报系统</title>
+    <link rel="icon" href="{{ url_for('assets', filename='favicon.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+    <header class="container-xl pt-3 pt-lg-4">
+        <div class="hero-card">
+            <div class="brand-panel">
+                <img src="{{ url_for('assets', filename='college_logo.png') }}"
+                     alt="西京学院科技商学院" class="brand-logo">
+            </div>
+            <div class="hero-copy">
+                <span class="college-kicker">西京学院 · 科技商学院</span>
+                <h1>教师教学工作量填报系统</h1>
+                <p>规范填报・精准核算・高效审核</p>
+            </div>
+        </div>
+    </header>
+
+    <main class="container-xl py-3 py-lg-4">
+        <section class="app-card" aria-labelledby="basic-heading">
+            <div class="section-heading">
+                <span class="section-icon" aria-hidden="true">👨‍🏫</span>
+                <h2 id="basic-heading">基本信息</h2>
+            </div>
+            <div class="row g-3">
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label for="department" class="form-label">所属系部</label>
+                    <select id="department" class="form-select"></select>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label for="teacher-name" class="form-label">姓名</label>
+                    <input id="teacher-name" class="form-control" autocomplete="name">
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label for="teacher-title" class="form-label">职称</label>
+                    <input id="teacher-title" class="form-control">
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label for="academic-term" class="form-label">学期</label>
+                    <select id="academic-term" class="form-select"></select>
+                </div>
+            </div>
+        </section>
+
+        <section class="app-card" aria-labelledby="detail-heading">
+            <div class="section-toolbar">
+                <div class="section-heading mb-0">
+                    <span class="section-icon" aria-hidden="true">📝</span>
+                    <h2 id="detail-heading">教学工作量明细</h2>
+                </div>
+                <button type="button" class="btn btn-primary add-record-button"
+                        data-action="add-record">
+                    <span aria-hidden="true">＋</span> 新增明细条目
+                </button>
+            </div>
+
+            <div class="policy-note" role="note">
+                同一项目、成果或事项涉及多个类别或阶段时，按最高标准认定，
+                不重复计算，不得跨类别重复申报。
+            </div>
+
+            <div id="empty-state" class="empty-state">
+                <div class="empty-icon" aria-hidden="true">▤</div>
+                <div>
+                    <strong>尚未添加教学工作量记录</strong>
+                    <p>点击“新增明细条目”开始填写，所有输入均即时保存在当前页面。</p>
+                </div>
+            </div>
+
+            <div id="record-list" class="record-list"></div>
+
+            <div id="bottom-add-wrap" class="text-center d-none">
+                <button type="button" class="btn btn-outline-primary px-4"
+                        data-action="add-record">
+                    ＋ 继续新增一条
+                </button>
+            </div>
+
+            <div class="total-card">
+                <span>工作量合计</span>
+                <strong><span id="total-workload">0</span> <small>学时</small></strong>
+            </div>
+        </section>
+
+        <section class="app-card" aria-labelledby="operation-heading">
+            <div class="section-heading">
+                <span class="section-icon" aria-hidden="true">⚙️</span>
+                <h2 id="operation-heading">数据导入导出</h2>
+            </div>
+            <div class="row g-3 align-items-stretch">
+                <div class="col-12 col-lg-5">
+                    <div class="operation-card operation-primary">
+                        <button type="button" id="export-button"
+                                class="btn btn-primary w-100">
+                            <span class="button-icon" aria-hidden="true">📊</span>
+                            <span class="button-label">导出 Excel 报表</span>
+                        </button>
+                        <p>校验全部填报内容，按审核人顺序生成正式报表。</p>
+                    </div>
+                </div>
+                <div class="col-12 col-lg-7">
+                    <div class="operation-card progress-card">
+                        <div class="operation-title">🔄 <span>进度管理</span></div>
+                        <div class="row g-2">
+                            <div class="col-12 col-md-6">
+                                <button type="button" id="save-progress"
+                                        class="btn btn-outline-primary w-100">
+                                    💾 暂存填报进度
+                                </button>
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <button type="button" id="restore-progress"
+                                        class="btn btn-outline-primary w-100">
+                                    📂 恢复填报进度
+                                </button>
+                                <input type="file" id="restore-file"
+                                       accept="application/json,.json" hidden>
+                            </div>
+                        </div>
+                        <p>下载当前内容作为本地暂存文件，后续可重新导入继续填写。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="container-xl app-footer">
+        <div>© 2026 西京学院科技商学院 · 系统版本 v<span id="app-version"></span></div>
+        <div>地址：陕西省西安市长安区西京路1号</div>
+    </footer>
+
+    <div class="toast-container position-fixed top-0 end-0 p-3">
+        <div id="app-toast" class="toast border-0" role="status" aria-live="polite">
+            <div class="d-flex">
+                <div class="toast-body"></div>
+                <button type="button" class="btn-close me-2 m-auto"
+                        data-bs-dismiss="toast" aria-label="关闭"></button>
+            </div>
+        </div>
+    </div>
+
+    <template id="record-template">
+        <article class="record-card">
+            <div class="record-header">
+                <strong class="record-number"></strong>
+                <div class="record-actions">
+                    <span class="reviewer-pill">未标注</span>
+                    <button type="button" class="delete-record"
+                            title="删除本条记录" aria-label="删除本条记录">×</button>
+                </div>
+            </div>
+            <div class="record-body">
+                <div class="record-grid">
+                    <div class="field-category">
+                        <label class="form-label">项目类别</label>
+                        <select class="form-select category-input">
+                            <option value="">请选择项目类别</option>
+                        </select>
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div class="field-standard position-relative">
+                        <label class="form-label">计算标准（输入关键词可检索）</label>
+                        <input class="form-control standard-input"
+                               placeholder="请先选择项目类别"
+                               autocomplete="off" disabled>
+                        <div class="standard-menu list-group"></div>
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div class="field-workload">
+                        <label class="form-label">工作量（学时）</label>
+                        <input class="form-control workload-input"
+                               inputmode="decimal" placeholder="请输入工作量">
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div class="field-date">
+                        <label class="form-label">实际取得时间</label>
+                        <input type="date" class="form-control date-input">
+                        <div class="invalid-feedback"></div>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="form-label">完成说明</label>
+                    <textarea class="form-control remark-input" rows="2"
+                              placeholder="请填写具体成果/业绩内容，不得为空"></textarea>
+                    <div class="invalid-feedback"></div>
+                </div>
+            </div>
+        </article>
+    </template>
+
+    <script>
+        window.APP_CONFIG = {{ app_config | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
