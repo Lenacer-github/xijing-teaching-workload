@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import json
+import re
 import unittest
 
 from openpyxl import load_workbook
@@ -36,12 +38,20 @@ class WebAppTestCase(unittest.TestCase):
     def test_page_and_health(self):
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
-        self.assertIn("教师教学工作量填报系统", page.get_data(as_text=True))
-        self.assertIn("record-template", page.get_data(as_text=True))
+        page_text = page.get_data(as_text=True)
+        self.assertIn("教师教学工作量填报系统", page_text)
+        self.assertIn("record-template", page_text)
+        self.assertIn("2.0.0", page_text)
+        config_match = re.search(
+            r"window\.APP_CONFIG = (.*?);", page_text, flags=re.DOTALL
+        )
+        self.assertIsNotNone(config_match)
+        rendered_config = json.loads(config_match.group(1))
+        self.assertEqual(rendered_config["categories"], list(WORKLOAD_DATA))
 
         health = self.client.get("/health")
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(health.get_json()["version"], "1.0.0")
+        self.assertEqual(health.get_json()["version"], "2.0.0")
 
     def test_restore_normalizes_progress(self):
         response = self.client.post("/api/restore", json=self.payload)

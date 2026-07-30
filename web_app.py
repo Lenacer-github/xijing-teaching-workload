@@ -28,10 +28,12 @@ app = Flask(
 )
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 app.json.ensure_ascii = False
+app.json.sort_keys = False
 
 
 @app.get("/")
 def index():
+    catalog = public_catalog()
     return render_template(
         "index.html",
         app_config={
@@ -39,7 +41,8 @@ def index():
             "departments": DEPARTMENT_OPTIONS,
             "terms": ACADEMIC_TERM_OPTIONS,
             "defaultTerm": DEFAULT_ACADEMIC_TERM,
-            "catalog": public_catalog(),
+            "categories": list(catalog),
+            "catalog": catalog,
         },
     )
 

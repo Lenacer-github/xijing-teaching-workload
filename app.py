@@ -12,7 +12,7 @@ from pathlib import Path
 
 from excel_export import build_workload_excel
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 RUN_STARTED_AT = time.perf_counter()
 PERFORMANCE_LOGGER = logging.getLogger("workload_app.performance")
 

@@ -17,7 +17,7 @@ from typing import Any
 
 
 BASE_DIR = Path(__file__).resolve().parent
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 DEPARTMENT_OPTIONS = [
     "数字商务系",
     "大数据管理应用系",

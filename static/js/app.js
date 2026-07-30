@@ -152,7 +152,7 @@
         updateReviewer(card, row.reviewer);
 
         const category = $(".category-input", card);
-        populateSelect(category, ["", ...Object.keys(catalog)]);
+        populateSelect(category, ["", ...config.categories]);
         category.options[0].textContent = "请选择项目类别";
         category.value = row.category;
         category.addEventListener("change", () => {
