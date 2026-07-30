@@ -12,6 +12,7 @@ from pathlib import Path
 
 from excel_export import build_workload_excel
 
+APP_VERSION = "1.0.0"
 RUN_STARTED_AT = time.perf_counter()
 PERFORMANCE_LOGGER = logging.getLogger("workload_app.performance")
 
@@ -2225,9 +2226,9 @@ components.html(
 
 # ================= 6. 底部版权信息 =================
 st.markdown(
-    """
+    f"""
     <div class='app-footer'>
-        <div>© 2026 西京学院科技商学院</div>
+        <div>© 2026 西京学院科技商学院 · 系统版本 v{APP_VERSION}</div>
         <div class='footer-address'>地址：陕西省西安市长安区西京路1号</div>
     </div>
     """,
