@@ -3,12 +3,17 @@ import streamlit.components.v1 as components
 import base64
 import html
 import json
+import logging
 import re
+import time
 from decimal import Decimal, InvalidOperation
 from datetime import date, datetime
 from pathlib import Path
 
 from excel_export import build_workload_excel
+
+RUN_STARTED_AT = time.perf_counter()
+PERFORMANCE_LOGGER = logging.getLogger("workload_app.performance")
 
 # ================= 1. 完整基础数据配置 =================
 WORKLOAD_DATA = {
@@ -137,10 +142,13 @@ def load_image_data_uri(image_path):
 LOGO_DATA_URI = load_image_data_uri(str(LOGO_PATH))
 
 
-@st.cache_data(show_spinner=False)
-def generate_excel_bytes(app_data):
-    """生成可在本地及 Streamlit Community Cloud 运行的 Excel 文件。"""
-    return build_workload_excel(prepare_export_data(app_data))
+def generate_excel_bytes(app_data, export_date):
+    """按需生成 Excel；不缓存不同用户的文件，避免云端内存持续增长。"""
+    export_source = {
+        **app_data,
+        "fill_date": export_date,
+    }
+    return build_workload_excel(prepare_export_data(export_source))
 
 
 def make_excel_filename(app_data):
@@ -209,7 +217,9 @@ def prepare_export_data(app_data):
         )
     )
     export_data["rows"] = [row for _, row in indexed_rows]
+    export_term = export_data.get("term", DEFAULT_ACADEMIC_TERM)
     for row in export_data["rows"]:
+        row["term"] = export_term
         standard = row.get("standard", "")
         row["reviewer"] = get_standard_owner(standard)
         row["standard"] = get_standard_text(standard)
@@ -246,6 +256,15 @@ def normalize_restored_data(data):
     if not isinstance(rows, list):
         raise ValueError("工作量明细必须是列表")
 
+    term = data.get(
+        "term",
+        rows[0].get("term", DEFAULT_ACADEMIC_TERM)
+        if rows and isinstance(rows[0], dict)
+        else DEFAULT_ACADEMIC_TERM,
+    )
+    if term not in ACADEMIC_TERM_OPTIONS:
+        raise ValueError("学期不在当前系统选项中")
+
     normalized_rows = []
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
@@ -259,7 +278,10 @@ def normalize_restored_data(data):
         standard = row.get("standard", "")
         standard_text = get_standard_text(standard)
         matched_standard = None
-        if category in WORKLOAD_DATA:
+        if not standard_text:
+            if category and category not in WORKLOAD_DATA:
+                raise ValueError(f"记录 {index} 的项目类别不在当前清单中")
+        elif category in WORKLOAD_DATA:
             matched_standard = next(
                 (
                     option
@@ -268,7 +290,7 @@ def normalize_restored_data(data):
                 ),
                 None,
             )
-        if matched_standard is None:
+        if standard_text and matched_standard is None:
             for current_category, options in WORKLOAD_DATA.items():
                 matched_standard = next(
                     (
@@ -281,9 +303,9 @@ def normalize_restored_data(data):
                 if matched_standard is not None:
                     category = current_category
                     break
-        if matched_standard is None:
+        if standard_text and matched_standard is None:
             raise ValueError(f"记录 {index} 的计算标准不在当前清单中")
-        standard = matched_standard
+        standard = matched_standard or ""
 
         workload_raw = row.get("workload", "")
         if workload_raw in ("", None):
@@ -323,6 +345,7 @@ def normalize_restored_data(data):
         "dept": dept,
         "name": name.strip(),
         "title": title.strip(),
+        "term": term,
         "fill_date": str(fill_date),
         "rows": normalized_rows,
     }
@@ -344,20 +367,25 @@ def delete_record(index):
     rows = st.session_state.app_data["rows"]
     if 0 <= index < len(rows):
         rows.pop(index)
+    st.session_state.pop("new_record_target", None)
     clear_record_widget_state()
 
 
 def add_empty_record():
-    """新增一条默认的教学工作量记录。"""
-    category = next(iter(WORKLOAD_DATA))
+    """新增一条待用户选择成果类别和计算标准的记录。"""
     st.session_state.app_data["rows"].append({
-        "term": DEFAULT_ACADEMIC_TERM,
-        "category": category,
-        "standard": WORKLOAD_DATA[category][0],
+        "term": st.session_state.app_data.get(
+            "term", DEFAULT_ACADEMIC_TERM
+        ),
+        "category": "",
+        "standard": "",
         "workload": "",
         "time": "",
         "remark": "",
     })
+    st.session_state.new_record_target = len(
+        st.session_state.app_data["rows"]
+    )
 
 
 def format_standard_option(standard):
@@ -368,6 +396,18 @@ def format_standard_option(standard):
 def standard_display_map(options):
     """返回计算标准展示文本到原始业务值的映射。"""
     return {format_standard_option(option): option for option in options}
+
+
+# 基础清单在运行期间不会变化，模块加载时一次性生成展示映射。
+WORKLOAD_CATEGORY_OPTIONS = tuple(WORKLOAD_DATA)
+STANDARD_DISPLAY_MAPS = {
+    category: standard_display_map(options)
+    for category, options in WORKLOAD_DATA.items()
+}
+STANDARD_DISPLAY_OPTIONS = {
+    category: tuple(display_map)
+    for category, display_map in STANDARD_DISPLAY_MAPS.items()
+}
 
 
 def get_effective_workload_text(index, row):
@@ -388,7 +428,7 @@ def collect_validation_state(app_data):
             ("所属系部", app_data.get("dept", "")),
             ("姓名", app_data.get("name", "")),
             ("职称", app_data.get("title", "")),
-            ("填报日期", app_data.get("fill_date", "")),
+            ("学期", app_data.get("term", "")),
         )
         if not str(value).strip()
     ]
@@ -409,12 +449,20 @@ def collect_validation_state(app_data):
     ]
 
     row_errors = {}
+    missing_category_rows = []
+    missing_standard_rows = []
     missing_workload_rows = []
     invalid_workload_rows = []
     missing_time_rows = []
     missing_remark_rows = []
     for index, row in enumerate(rows, start=1):
         errors = []
+        if not str(row.get("category", "")).strip():
+            missing_category_rows.append(index)
+            errors.append("请选择项目类别")
+        if not str(row.get("standard", "")).strip():
+            missing_standard_rows.append(index)
+            errors.append("请选择计算标准")
         workload_text = get_effective_workload_text(index - 1, row)
         if not workload_text:
             missing_workload_rows.append(index)
@@ -435,7 +483,20 @@ def collect_validation_state(app_data):
             missing_remark_rows.append(index)
             errors.append("请填写具体成果或业绩内容")
         if index in duplicate_row_numbers:
-            errors.append("该计算标准与其他记录重复")
+            conflicting_rows = next(
+                (
+                    group
+                    for group in duplicate_groups
+                    if index in group
+                ),
+                [],
+            )
+            other_row = next(
+                (row_number for row_number in conflicting_rows if row_number != index),
+                None,
+            )
+            if other_row is not None:
+                errors.append(f"该成果类别与记录{other_row}重复")
         row_errors[index] = errors
 
     issues = []
@@ -443,6 +504,14 @@ def collect_validation_state(app_data):
         issues.append(f"基本信息缺少：{'、'.join(missing_basic_fields)}")
     if not rows:
         issues.append("尚未新增教学工作量明细")
+    if missing_category_rows:
+        issues.append(
+            f"记录 {'、'.join(map(str, missing_category_rows))} 未选择项目类别"
+        )
+    if missing_standard_rows:
+        issues.append(
+            f"记录 {'、'.join(map(str, missing_standard_rows))} 未选择计算标准"
+        )
     if missing_workload_rows:
         issues.append(
             f"记录 {'、'.join(map(str, missing_workload_rows))} 未填写工作量"
@@ -456,7 +525,7 @@ def collect_validation_state(app_data):
             f"记录 {'、'.join(map(str, group))}"
             for group in duplicate_groups
         )
-        issues.append(f"{duplicate_text} 重复选择了同一计算标准")
+        issues.append(f"{duplicate_text} 选择了重复的成果类别")
     if missing_time_rows:
         issues.append(
             f"记录 {'、'.join(map(str, missing_time_rows))} 未填写完成时间"
@@ -831,11 +900,6 @@ st.markdown("""
         min-width: 0 !important;
         min-height: 38px !important;
         height: 38px !important;
-    }
-    [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .operations-section-marker)
-    [data-testid="column"]:has(.operation-progress-marker)
-    [data-testid="stFileUploadDropzone"] > button::after {
-        content: "📂 恢复填报进度";
         font-size: .9rem !important;
         font-weight: 680 !important;
         line-height: 1.25 !important;
@@ -930,17 +994,36 @@ st.markdown("""
     }
     div[data-baseweb="select"] > div {
         min-height: 42px !important;
-        height: auto !important;
+        height: 42px !important;
+        max-height: 42px !important;
         border: 1px solid var(--border) !important;
         border-radius: 10px !important;
         background: #FFFFFF !important;
         box-shadow: 0 1px 2px rgba(15,23,42,.025);
+        overflow: hidden !important;
     }
     [data-testid="stSelectbox"] [data-baseweb="select"] div[value] {
-        padding-top: .5rem;
-        padding-bottom: .5rem;
+        min-width: 0 !important;
+        height: 40px !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        display: flex !important;
+        align-items: center !important;
         color: #1E293B !important;
-        line-height: 1.5 !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    [data-testid="stSelectbox"] [data-baseweb="select"] div[value] > div {
+        min-width: 0 !important;
+        height: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
     /* 基本信息区四个控件保持完全一致的高度 */
     [data-testid="stVerticalBlockBorderWrapper"]:has(> div:not([data-testid]) > [data-testid="stVerticalBlock"] > [data-testid="element-container"] .basic-section-marker)
@@ -984,7 +1067,7 @@ st.markdown("""
 
     /* 单条工作量卡片 */
     [data-testid="stVerticalBlockBorderWrapper"]:has(.record-card-marker):not(:has(.details-section-marker)) {
-        margin: .8rem 0 1rem;
+        margin: .4rem 0 .6rem;
         border: 1px solid #D9E4F2 !important;
         border-radius: 15px !important;
         background: #FFFFFF;
@@ -996,15 +1079,46 @@ st.markdown("""
         box-shadow: 0 12px 28px rgba(30,58,91,.085);
     }
     [data-testid="stVerticalBlockBorderWrapper"]:has(.record-card-marker):not(:has(.details-section-marker)) > div {
-        padding: .9rem 1.05rem 1.05rem;
+        padding: .55rem .75rem .65rem;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.record-card-marker):not(:has(.details-section-marker))
+    > div:not([data-testid]) > [data-testid="stVerticalBlock"] {
+        gap: .55rem !important;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.record-card-marker):not(:has(.details-section-marker))
+    [data-testid="stTextArea"] {
+        width: calc(100% - .2rem) !important;
+        margin-right: .1rem !important;
+        margin-left: .1rem !important;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.record-card-marker):not(:has(.details-section-marker))
+    [data-testid="stTextArea"] textarea {
+        min-height: 58px !important;
+        height: 58px !important;
+    }
+    .bottom-add-record-marker {
+        height: 0;
+    }
+    [data-testid="column"]:has(.bottom-add-record-marker)
+    .stButton > button {
+        min-height: 40px;
+        border-color: #9CB9E0 !important;
+        color: var(--brand) !important;
+        background: #F8FBFF !important;
+        box-shadow: 0 5px 14px rgba(11,61,145,.08);
+    }
+    [data-testid="column"]:has(.bottom-add-record-marker)
+    .stButton > button:hover {
+        border-color: var(--brand) !important;
+        background: var(--brand-soft) !important;
     }
     .record-title {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        min-height: 2.15rem;
+        min-height: 1.95rem;
         margin-top: 0;
-        padding: .48rem .78rem;
+        padding: .36rem .7rem;
         border-left: 4px solid var(--record-accent, var(--brand));
         border-radius: 9px;
         color: var(--brand-strong);
@@ -1311,9 +1425,11 @@ st.markdown(f"""
 if 'app_data' not in st.session_state:
     st.session_state.app_data = {
         "dept": "", "name": "", "title": "",
+        "term": DEFAULT_ACADEMIC_TERM,
         "fill_date": date.today().isoformat(),
         "rows": []
     }
+st.session_state.app_data.setdefault("term", DEFAULT_ACADEMIC_TERM)
 if "restore_uploader_version" not in st.session_state:
     st.session_state.restore_uploader_version = 0
 if "validation_requested" not in st.session_state:
@@ -1327,11 +1443,12 @@ if "pending_restore_data" in st.session_state:
     st.session_state.app_data = restored_data
     clear_record_widget_state()
     for basic_key in (
-        "basic_dept", "basic_name", "basic_title", "basic_fill_date"
+        "basic_dept", "basic_name", "basic_title", "basic_term"
     ):
         st.session_state.pop(basic_key, None)
     st.session_state.validation_requested = False
     st.session_state.scroll_to_first_error = False
+    st.session_state.pop("new_record_target", None)
     st.session_state.pending_excel_export = False
     st.session_state.restore_notice = (
         f"已成功恢复 {len(restored_data['rows'])} 条工作量记录。"
@@ -1340,25 +1457,41 @@ if "pending_restore_data" in st.session_state:
 
 def sync_widget_values_to_app_data():
     """在顶部导出区渲染前同步本次交互产生的最新表单值。"""
+    basic_widget_fields = (
+        ("basic_dept", "dept"),
+        ("basic_name", "name"),
+        ("basic_title", "title"),
+        ("basic_term", "term"),
+    )
+    for widget_key, data_key in basic_widget_fields:
+        if widget_key in st.session_state:
+            st.session_state.app_data[data_key] = (
+                st.session_state[widget_key] or ""
+            )
+
+    current_term = st.session_state.app_data.get(
+        "term", DEFAULT_ACADEMIC_TERM
+    )
     for i, row in enumerate(st.session_state.app_data["rows"]):
+        row["term"] = current_term
         for field, prefix in (
-            ("term", "term"),
             ("category", "cat"),
             ("remark", "rmk"),
         ):
             widget_key = f"{prefix}_{i}"
             if widget_key in st.session_state:
-                row[field] = st.session_state[widget_key]
+                row[field] = st.session_state[widget_key] or ""
 
         standard_key = f"std_{i}"
         if standard_key in st.session_state:
-            category_options = WORKLOAD_DATA.get(row.get("category", ""), [])
-            display_map = standard_display_map(category_options)
+            display_map = STANDARD_DISPLAY_MAPS.get(
+                row.get("category", ""), {}
+            )
             selected_standard = st.session_state[standard_key]
             if selected_standard in display_map:
                 row["standard"] = display_map[selected_standard]
-            elif category_options:
-                row["standard"] = category_options[0]
+            else:
+                row["standard"] = ""
 
         workload_key = f"wl_{i}"
         if workload_key in st.session_state:
@@ -1407,7 +1540,7 @@ with st.container(border=True):
             saved_dept = "数字商务系"
         dept_index = DEPARTMENT_OPTIONS.index(saved_dept) if saved_dept in DEPARTMENT_OPTIONS else 0
         dept = st.selectbox(
-            "所属系部（必填）",
+            "所属系部",
             DEPARTMENT_OPTIONS,
             index=dept_index,
             key="basic_dept"
@@ -1415,7 +1548,7 @@ with st.container(border=True):
         st.session_state.app_data["dept"] = dept
     with col2:
         name = st.text_input(
-            "姓名（必填）",
+            "姓名",
             value=st.session_state.app_data["name"],
             key="basic_name"
         )
@@ -1424,7 +1557,7 @@ with st.container(border=True):
             st.error("请输入姓名")
     with col3:
         title = st.text_input(
-            "职称（必填）",
+            "职称",
             value=st.session_state.app_data["title"],
             key="basic_title"
         )
@@ -1432,22 +1565,20 @@ with st.container(border=True):
         if st.session_state.validation_requested and not title.strip():
             st.error("请输入职称")
     with col4:
-        try:
-            saved_fill_date = datetime.strptime(
-                st.session_state.app_data.get("fill_date", ""),
-                "%Y-%m-%d"
-            ).date()
-        except ValueError:
-            saved_fill_date = date.today()
-        fill_date = st.date_input(
-            "填报日期（必填）",
-            saved_fill_date,
-            key="basic_fill_date"
+        saved_term = st.session_state.app_data.get(
+            "term", DEFAULT_ACADEMIC_TERM
         )
-        st.session_state.app_data["fill_date"] = fill_date.isoformat()
+        term = st.selectbox(
+            "学期",
+            ACADEMIC_TERM_OPTIONS,
+            index=ACADEMIC_TERM_OPTIONS.index(saved_term),
+            key="basic_term",
+        )
+        st.session_state.app_data["term"] = term
+        for row in st.session_state.app_data["rows"]:
+            row["term"] = term
 
 # ================= 4. 工作量明细展示区 =================
-validation_state = collect_validation_state(st.session_state.app_data)
 with st.container(border=True):
     st.markdown(
         "<div id='workload-details' class='details-section-marker'></div>",
@@ -1538,51 +1669,78 @@ with st.container(border=True):
                     args=(i,),
                 )
 
-            c1, c2, c3 = st.columns([1.5, 1.5, 4])
+            c1, c2, c3, c4 = st.columns([1.75, 4.5, 1.05, 1.9])
             with c1:
-                row["term"] = st.selectbox(
-                    "学期",
-                    ACADEMIC_TERM_OPTIONS,
-                    key=f"term_{i}",
-                    index=ACADEMIC_TERM_OPTIONS.index(
-                        row.get("term", DEFAULT_ACADEMIC_TERM)
-                    )
-                )
-            with c2:
                 cat_index = (
-                    list(WORKLOAD_DATA.keys()).index(row["category"])
+                    WORKLOAD_CATEGORY_OPTIONS.index(row["category"])
                     if row["category"] in WORKLOAD_DATA
-                    else 0
+                    else None
                 )
-                row["category"] = st.selectbox(
+                selected_category = st.selectbox(
                     "项目类别",
-                    list(WORKLOAD_DATA.keys()),
+                    WORKLOAD_CATEGORY_OPTIONS,
                     key=f"cat_{i}",
-                    index=cat_index
+                    index=cat_index,
+                    placeholder="请选择项目类别",
                 )
-            with c3:
-                options = WORKLOAD_DATA[row["category"]]
-                display_map = standard_display_map(options)
-                display_options = list(display_map)
+                row["category"] = selected_category or ""
+                if (
+                    st.session_state.validation_requested
+                    and not row["category"]
+                ):
+                    st.error("请选择项目类别")
+            with c2:
+                display_map = STANDARD_DISPLAY_MAPS.get(
+                    row["category"], {}
+                )
+                display_options = STANDARD_DISPLAY_OPTIONS.get(
+                    row["category"], ()
+                )
                 current_display = format_standard_option(row["standard"])
                 default_idx = (
                     display_options.index(current_display)
                     if current_display in display_options
-                    else 0
+                    else None
                 )
                 selected_standard_display = st.selectbox(
                     "计算标准（输入关键词可检索）",
                     display_options,
                     key=f"std_{i}",
                     index=default_idx,
+                    placeholder=(
+                        "请选择计算标准"
+                        if row["category"]
+                        else "请先选择项目类别"
+                    ),
+                    disabled=not row["category"],
                     help="展开后可直接输入项目名称或核算规则中的关键词进行检索。",
                 )
-                row["standard"] = display_map[selected_standard_display]
-                if selected_standards.count(row["standard"]) > 1:
-                    st.error("该计算标准与其他记录重复")
-
-            c4, c5, c6 = st.columns([1, 1.5, 4.3])
-            with c4:
+                row["standard"] = display_map.get(selected_standard_display, "")
+                if (
+                    st.session_state.validation_requested
+                    and not row["standard"]
+                ):
+                    st.error("请选择计算标准")
+                elif (
+                    row["standard"]
+                    and selected_standards.count(row["standard"]) > 1
+                ):
+                    duplicate_record = next(
+                        (
+                            number
+                            for number, other_row in enumerate(
+                                st.session_state.app_data["rows"], start=1
+                            )
+                            if number != row_number
+                            and other_row.get("standard") == row["standard"]
+                        ),
+                        None,
+                    )
+                    if duplicate_record is not None:
+                        st.error(
+                            f"该成果类别与记录{duplicate_record}重复"
+                        )
+            with c3:
                 workload_text = st.text_input(
                     "工作量（学时）",
                     key=f"wl_{i}",
@@ -1595,7 +1753,8 @@ with st.container(border=True):
                 )
                 if not workload_text.strip():
                     row["workload"] = ""
-                    st.error("请填写工作量")
+                    if st.session_state.validation_requested:
+                        st.error("请填写工作量")
                 else:
                     try:
                         workload_value = Decimal(workload_text.strip())
@@ -1606,7 +1765,7 @@ with st.container(border=True):
                     except (InvalidOperation, ValueError):
                         invalid_workload_rows.append(str(i + 1))
                         st.error("请输入不小于 0 的数字")
-            with c5:
+            with c4:
                 time_str = row.get("time", "")
                 try:
                     current_date = (
@@ -1618,24 +1777,45 @@ with st.container(border=True):
                     current_date = None
 
                 selected_date = st.date_input(
-                    "完成时间（必填）",
+                    "实际取得时间",
                     value=current_date,
                     key=f"time_{i}"
                 )
                 row["time"] = selected_date.strftime("%Y-%m-%d") if selected_date else ""
-                if not row["time"]:
+                if (
+                    st.session_state.validation_requested
+                    and not row["time"]
+                ):
                     st.error("请选择完成时间")
 
-            with c6:
-                row["remark"] = st.text_area(
-                    "完成说明（必填）",
-                    key=f"rmk_{i}",
-                    value=row.get("remark", ""),
-                    placeholder="请填写具体成果/业绩内容，不得为空",
-                    height=80
-                )
-                if not row["remark"].strip():
-                    st.error("请填写具体成果或业绩内容")
+            row["remark"] = st.text_area(
+                "完成说明",
+                key=f"rmk_{i}",
+                value=row.get("remark", ""),
+                placeholder="请填写具体成果/业绩内容，不得为空",
+                height=68
+            )
+            if (
+                st.session_state.validation_requested
+                and not row["remark"].strip()
+            ):
+                st.error("请填写具体成果或业绩内容")
+
+    if st.session_state.app_data["rows"]:
+        bottom_add_left, bottom_add_col, bottom_add_right = st.columns(
+            [4, 1.7, 4]
+        )
+        with bottom_add_col:
+            st.markdown(
+                "<div class='bottom-add-record-marker'></div>",
+                unsafe_allow_html=True,
+            )
+            st.button(
+                "＋ 继续新增一条",
+                use_container_width=True,
+                on_click=add_empty_record,
+                key="add_record_bottom",
+            )
 
     total_workload_display = format_workload_value(f"{total_workload:.10f}")
     st.markdown(
@@ -1668,7 +1848,6 @@ with st.container(border=True):
 
     with excel_col:
         st.markdown("<div class='operation-primary-marker'></div>", unsafe_allow_html=True)
-        validation_state = collect_validation_state(st.session_state.app_data)
         validation_issues = validation_state["issues"]
         excel_is_ready = not validation_issues
 
@@ -1691,7 +1870,10 @@ with st.container(border=True):
         st.session_state.pending_excel_export = False
         if should_generate_excel:
             try:
-                excel_bytes = generate_excel_bytes(st.session_state.app_data)
+                excel_bytes = generate_excel_bytes(
+                    st.session_state.app_data,
+                    date.today().isoformat(),
+                )
                 excel_payload = base64.b64encode(excel_bytes).decode("ascii")
                 excel_filename = json.dumps(
                     make_excel_filename(st.session_state.app_data),
@@ -1747,6 +1929,7 @@ with st.container(border=True):
                 "dept": st.session_state.app_data["dept"],
                 "name": st.session_state.app_data["name"],
                 "title": st.session_state.app_data["title"],
+                "term": st.session_state.app_data["term"],
                 "fill_date": st.session_state.app_data["fill_date"],
                 "rows": st.session_state.app_data["rows"]
             }
@@ -1794,7 +1977,36 @@ with st.container(border=True):
         if restore_notice:
             st.success(restore_notice)
 
-if (
+new_record_target = st.session_state.pop("new_record_target", None)
+if new_record_target is not None:
+    new_record_id = json.dumps(f"record-{new_record_target}")
+    components.html(
+        f"""
+        <script>
+        window.setTimeout(() => {{
+            const target = parent.document.getElementById({new_record_id});
+            if (!target) return;
+            const recordCard =
+                target.closest('[data-testid="stVerticalBlockBorderWrapper"]') ||
+                target.parentElement;
+            recordCard.scrollIntoView({{
+                behavior: "smooth",
+                block: "start"
+            }});
+            window.setTimeout(() => {{
+                const categorySelect = recordCard.querySelector(
+                    '[data-testid="stSelectbox"] [role="combobox"]'
+                );
+                if (categorySelect) {{
+                    categorySelect.focus({{preventScroll: true}});
+                }}
+            }}, 420);
+        }}, 160);
+        </script>
+        """,
+        height=0,
+    )
+elif (
     st.session_state.scroll_to_first_error
     and validation_state.get("first_error_target")
 ):
@@ -1826,13 +2038,17 @@ accessibility_version = (
 components.html(
     f"<!-- accessibility:{accessibility_version} -->" + """
     <script>
-    const chineseMonths = {
+    const chineseInterfaceText = {
         January: '1月', February: '2月', March: '3月',
         April: '4月', May: '5月', June: '6月',
         July: '7月', August: '8月', September: '9月',
-        October: '10月', November: '11月', December: '12月'
+        October: '10月', November: '11月', December: '12月',
+        'Choose an option': '请选择',
+        'No result': '未找到匹配项',
+        'No results': '未找到匹配项',
+        'No results found': '未找到匹配项'
     };
-    const translateCalendarMonths = (root) => {
+    const translateInterfaceText = (root) => {
         const walker = root.createTreeWalker(
             root.body,
             parent.NodeFilter.SHOW_TEXT
@@ -1840,8 +2056,15 @@ components.html(
         const textNodes = [];
         while (walker.nextNode()) textNodes.push(walker.currentNode);
         textNodes.forEach((node) => {
-            const month = node.nodeValue.trim();
-            if (chineseMonths[month]) node.nodeValue = chineseMonths[month];
+            const sourceText = node.nodeValue.trim();
+            if (chineseInterfaceText[sourceText]) {
+                node.nodeValue = chineseInterfaceText[sourceText];
+            }
+        });
+        root.querySelectorAll(
+            'input[placeholder="Choose an option"]'
+        ).forEach((input) => {
+            input.setAttribute('placeholder', '请输入关键词检索');
         });
     };
     const applyChineseLabels = () => {
@@ -1864,12 +2087,12 @@ components.html(
             if (button) {
                 button.setAttribute('aria-label', '恢复填报进度');
                 button.setAttribute('title', '恢复填报进度');
-                if (button.textContent.trim() !== '恢复填报进度') {
-                    button.textContent = '恢复填报进度';
+                if (button.textContent.trim() !== '📂 恢复填报进度') {
+                    button.textContent = '📂 恢复填报进度';
                 }
             }
         });
-        translateCalendarMonths(root);
+        translateInterfaceText(root);
     };
     applyChineseLabels();
     window.setTimeout(applyChineseLabels, 200);
@@ -1883,18 +2106,23 @@ components.html(
          * 弹层时处理中文标签，避免每次细小 DOM 变化都扫描整张页面。
          */
         const needsUpdate = mutations.some((mutation) =>
+            mutation.target.parentElement?.closest?.(
+                '[role="listbox"], [data-baseweb="popover"]'
+            ) ||
             Array.from(mutation.addedNodes).some((node) => {
                 if (node.nodeType !== parent.Node.ELEMENT_NODE) return false;
                 return (
                     node.matches?.(
                         '[data-testid="stDateInput"], ' +
                         '[data-testid="stFileUploader"], ' +
-                        '[role="dialog"], [data-baseweb="calendar"]'
+                        '[role="dialog"], [role="listbox"], ' +
+                        '[data-baseweb="calendar"], [data-baseweb="popover"]'
                     ) ||
                     node.querySelector?.(
                         '[data-testid="stDateInput"], ' +
                         '[data-testid="stFileUploader"], ' +
-                        '[role="dialog"], [data-baseweb="calendar"]'
+                        '[role="dialog"], [role="listbox"], ' +
+                        '[data-baseweb="calendar"], [data-baseweb="popover"]'
                     )
                 );
             })
@@ -1926,3 +2154,12 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+run_elapsed_ms = (time.perf_counter() - RUN_STARTED_AT) * 1000
+if run_elapsed_ms >= 750:
+    PERFORMANCE_LOGGER.warning(
+        "slow_rerun elapsed_ms=%.1f rows=%d validation_requested=%s",
+        run_elapsed_ms,
+        len(st.session_state.app_data.get("rows", [])),
+        st.session_state.validation_requested,
+    )

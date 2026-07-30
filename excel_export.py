@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import math
 import re
+import unicodedata
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -14,6 +16,9 @@ from openpyxl.worksheet.page import PageMargins
 
 
 FONT_NAME = "SimHei"
+EDIT_PASSWORD = "20130052"
+DATA_COLUMN_WIDTHS = [16, 58, 10, 13, 32, 26]
+MIN_DATA_ROW_HEIGHT = 36
 THIN_BLACK = Side(style="thin", color="000000")
 ALL_BORDERS = Border(
     left=THIN_BLACK,
@@ -21,6 +26,34 @@ ALL_BORDERS = Border(
     top=THIN_BLACK,
     bottom=THIN_BLACK,
 )
+
+
+def _display_width(text: object) -> int:
+    """按中英文字符的近似显示宽度计算 Excel 换行占用。"""
+    return sum(
+        2 if unicodedata.east_asian_width(character) in {"W", "F", "A"} else 1
+        for character in str(text or "")
+    )
+
+
+def _wrapped_line_count(text: object, column_width: float) -> int:
+    """估算启用自动换行后文本在指定列宽中需要的行数。"""
+    usable_width = max(int(column_width) - 1, 1)
+    paragraphs = str(text or "").splitlines() or [""]
+    return sum(
+        max(1, math.ceil(_display_width(paragraph) / usable_width))
+        for paragraph in paragraphs
+    )
+
+
+def _content_row_height(values: list[object]) -> float:
+    """以现有 36 磅为最小值，按最长单元格内容自动增加行高。"""
+    required_lines = max(
+        _wrapped_line_count(value, DATA_COLUMN_WIDTHS[index])
+        for index, value in enumerate(values)
+    )
+    estimated_height = required_lines * 13.5 + 8
+    return min(409, max(MIN_DATA_ROW_HEIGHT, estimated_height))
 
 
 def _patch_basic_info_rich_text(xlsx_bytes: bytes, data: dict) -> bytes:
@@ -146,9 +179,7 @@ def build_workload_excel(data: dict) -> bytes:
             cell.border = ALL_BORDERS
         sheet.cell(row=row_index, column=3).number_format = "General"
         sheet.cell(row=row_index, column=4).number_format = "yyyy-mm-dd"
-        sheet.row_dimensions[row_index].height = (
-            72 if len(str(row.get("reviewer", ""))) > 24 else 36
-        )
+        sheet.row_dimensions[row_index].height = _content_row_height(values)
 
     last_data_row = first_data_row + len(export_rows) - 1
     total_row = last_data_row + 2
@@ -188,8 +219,7 @@ def build_workload_excel(data: dict) -> bytes:
         cell.alignment = Alignment(vertical="center")
     sheet.row_dimensions[sign_row].height = 30
 
-    widths = [16, 58, 10, 13, 32, 26]
-    for column, width in enumerate(widths, start=1):
+    for column, width in enumerate(DATA_COLUMN_WIDTHS, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
 
     sheet.freeze_panes = "A6"
@@ -209,6 +239,8 @@ def build_workload_excel(data: dict) -> bytes:
     )
     sheet.print_area = f"A1:F{sign_row}"
     sheet.print_title_rows = "5:5"
+    sheet.protection.set_password(EDIT_PASSWORD)
+    sheet.protection.sheet = True
     try:
         workbook.calculation.fullCalcOnLoad = True
         workbook.calculation.forceFullCalc = True
