@@ -28,7 +28,8 @@ python web_app.py
 此改造版目前位于独立开发分支；原 Streamlit 版仍可按下述方式运行。
 
 服务器部署仅需安装 `requirements-web.txt` 中的精简依赖，不需要安装
-Streamlit。示例 systemd 服务位于 `deploy/xijing-workload.service`。
+Streamlit。示例 systemd 服务位于 `deploy/xijing-workload.service`，Nginx
+反向代理配置位于 `deploy/nginx-was.lenacer.com.conf`。
 
 ## Streamlit 版
 
