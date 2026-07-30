@@ -1321,7 +1321,8 @@ st.markdown("""
     }
     [data-baseweb="input"] > div,
     [data-baseweb="textarea"] > div {
-        border-color: var(--border) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 10px !important;
         background-color: #FFFFFF !important;
     }
     [data-baseweb="popover"],
