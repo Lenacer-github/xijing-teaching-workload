@@ -1,0 +1,25 @@
+[Unit]
+Description=Xijing Teaching Workload Web Application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xijing-workload
+Group=xijing-workload
+WorkingDirectory=/opt/xijing-workload/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/xijing-workload/venv/bin/gunicorn --workers 1 --threads 2 --bind 0.0.0.0:8601 --timeout 90 --max-requests 300 --max-requests-jitter 30 --access-logfile - --error-logfile - web_app:app
+Restart=on-failure
+RestartSec=3
+MemoryMax=160M
+CPUQuota=70%
+OOMScoreAdjust=500
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
