@@ -60,6 +60,12 @@ class WebAppTestCase(unittest.TestCase):
         self.assertEqual(restored["rows"][0]["workload"], 12.5)
         self.assertEqual(restored["rows"][0]["time"], "2026-07-30")
 
+    def test_restore_allows_empty_department_for_draft(self):
+        draft = {**self.payload, "dept": ""}
+        response = self.client.post("/api/restore", json=draft)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["dept"], "")
+
     def test_export_returns_valid_excel(self):
         response = self.client.post("/api/export", json=self.payload)
         self.assertEqual(response.status_code, 200)

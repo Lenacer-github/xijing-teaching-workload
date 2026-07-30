@@ -128,8 +128,10 @@ def normalize_payload(payload: Any, *, require_complete: bool) -> dict[str, Any]
     dept = str(payload.get("dept", "") or "").strip()
     if dept == "电子商务":
         dept = "数字商务系"
-    if dept not in DEPARTMENT_OPTIONS:
+    if dept and dept not in DEPARTMENT_OPTIONS:
         raise ValueError("请选择有效的所属系部")
+    if require_complete and not dept:
+        raise ValueError("请选择所属系部")
 
     name = str(payload.get("name", "") or "").strip()
     title = str(payload.get("title", "") or "").strip()

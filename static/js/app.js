@@ -4,7 +4,7 @@
     const config = window.APP_CONFIG;
     const catalog = config.catalog;
     const state = {
-        dept: config.departments[0] || "",
+        dept: "",
         name: "",
         title: "",
         term: config.defaultTerm,
@@ -417,7 +417,8 @@
         }
     }
 
-    populateSelect(deptInput, config.departments);
+    populateSelect(deptInput, ["", ...config.departments]);
+    deptInput.options[0].textContent = "请选择所属系部";
     populateSelect(termInput, config.terms);
     $("#app-version").textContent = config.version;
     syncBasicForm();
